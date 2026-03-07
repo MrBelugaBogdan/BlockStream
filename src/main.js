@@ -1,10 +1,7 @@
-// Головний запуск гри
 import { GameEngine } from './engine.js';
 
-const canvas = document.querySelector('#gameCanvas');
-const engine = new GameEngine(canvas);
+// Запуск BlockStream Engine
+const engine = new GameEngine();
+engine.init();
 
-// Запускаємо двигун
-engine.start();
-
-console.log("BlockStream запущено!");
+console.log("BlockStream Engine: Статус - ОК");
