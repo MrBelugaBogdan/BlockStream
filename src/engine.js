@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 export class GameEngine {
     constructor() {
+        this.projectName = "BlockStream";
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -11,29 +12,33 @@ export class GameEngine {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(this.renderer.domElement);
 
-        // Додаємо світло (як сонце)
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(5, 5, 5).normalize();
+        // Додаємо світло (як у справжніх іграх)
+        const light = new THREE.DirectionalLight(0xffffff, 1.2);
+        light.position.set(5, 10, 7.5).normalize();
         this.scene.add(light);
+        
+        const ambientLight = new THREE.AmbientLight(0x404040); // М'яке підсвічування тіней
+        this.scene.add(ambientLight);
 
-        // Створюємо перший блок (Земля)
+        // Наш перший блок у BlockStream
         const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 }); // Зелений
-        const cube = new THREE.Mesh(geometry, material);
-        this.scene.add(cube);
+        const material = new THREE.MeshStandardMaterial({ color: 0x228B22 }); // Колір трави
+        this.cube = new THREE.Mesh(geometry, material);
+        this.scene.add(this.cube);
 
-        this.camera.position.z = 5;
+        this.camera.position.z = 3;
+        this.camera.position.y = 1;
+        this.camera.lookAt(0, 0, 0);
 
-        // Запуск циклу гри
-        this.animate(cube);
+        this.animate();
     }
 
-    animate(cube) {
-        requestAnimationFrame(() => this.animate(cube));
+    animate() {
+        requestAnimationFrame(() => this.animate());
         
-        // Невелике обертання, щоб ми бачили, що це 3D
-        cube.rotation.x += 0.01;
-        cube.rotation.y += 0.01;
+        if (this.cube) {
+            this.cube.rotation.y += 0.01; // Обертаємо навколо осі
+        }
 
         this.renderer.render(this.scene, this.camera);
     }
