@@ -1,7 +1,5 @@
-import { GameEngine } from './engine.js';
-
-// Запуск BlockStream Engine
-const engine = new GameEngine();
+// Запуск BlockStream
+const engine = new window.GameEngine();
 engine.init();
 
-console.log("BlockStream Engine: Статус - ОК");
+console.log("BlockStream Engine запущено!");
