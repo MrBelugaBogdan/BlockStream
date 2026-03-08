@@ -10,13 +10,13 @@ export class GameEngine {
         
         this.controls = new PointerLockControls(this.camera, document.body);
         this.keys = {};
-        this.raycaster = new THREE.Raycaster();
+        this.raycaster = new THREE.Raycaster(); // Для ламання блоків
+        this.collisionRaycaster = new THREE.Raycaster(); // Для стін
         this.loader = new THREE.TextureLoader();
 
-        // ФІЗИКА ГРАВЦЯ
         this.velocity = new THREE.Vector3(); 
         this.canJump = false;
-        this.playerHeight = 1.8; // Твій зріст у блоках
+        this.playerHeight = 1.7; // Зріст гравця
     }
 
     init() {
@@ -24,34 +24,24 @@ export class GameEngine {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(this.renderer.domElement);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-        this.scene.add(ambientLight);
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
         const sun = new THREE.DirectionalLight(0xffffff, 1.0);
         sun.position.set(10, 20, 10);
         this.scene.add(sun);
 
         const grassTex = this.loader.load('./assets/grass.png');
         const stoneTex = this.loader.load('./assets/stone.png');
-
-        [grassTex, stoneTex].forEach(t => {
-            t.magFilter = THREE.NearestFilter;
-            t.minFilter = THREE.NearestFilter;
-        });
+        [grassTex, stoneTex].forEach(t => { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; });
 
         this.createWorld(grassTex, stoneTex);
 
         document.addEventListener('keydown', (e) => this.keys[e.code] = true);
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
-        
-        document.addEventListener('click', () => {
-            if (this.controls.isLocked) {
-                this.interact(true); 
-            } else {
-                this.controls.lock(); 
-            }
+        document.addEventListener('mousedown', (e) => {
+            if (this.controls.isLocked && e.button === 0) this.interact(); 
+            else this.controls.lock();
         });
 
-        // Початкова позиція (над землею)
         this.camera.position.set(8, 10, 8);
         this.animate();
     }
@@ -74,45 +64,56 @@ export class GameEngine {
         }
     }
 
-    interact(isBreaking) {
+    interact() {
         this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
         const intersects = this.raycaster.intersectObjects(this.scene.children);
-        if (intersects.length > 0 && isBreaking) {
-            this.scene.remove(intersects[0].object);
-        }
+        if (intersects.length > 0) this.scene.remove(intersects[0].object);
+    }
+
+    // Перевірка, чи є блок у напрямку руху
+    checkCollision(vector) {
+        this.collisionRaycaster.set(this.camera.position, vector);
+        const intersects = this.collisionRaycaster.intersectObjects(this.scene.children);
+        return intersects.length > 0 && intersects[0].distance < 0.7;
     }
 
     animate() {
         requestAnimationFrame(() => this.animate());
 
         if (this.controls.isLocked) {
-            const delta = 0.016; // 60 FPS
-            
-            // ГРАВІТАЦІЯ
-            this.velocity.y -= 25.0 * delta; 
+            const delta = 0.016;
+            this.velocity.y -= 25.0 * delta; // Гравітація
 
-            // РУХ (Тільки по горизонталі, без польоту вгору поглядом)
+            // Напрямки для перевірки колізій
+            const forward = new THREE.Vector3();
+            this.camera.getWorldDirection(forward);
+            forward.y = 0; forward.normalize();
+
+            const right = new THREE.Vector3().crossVectors(this.camera.up, forward).negate();
+
+            // РУХ З ПЕРЕВІРКОЮ СТІН
             const speed = 0.12;
-            if (this.keys['KeyW']) this.controls.moveForward(speed);
-            if (this.keys['KeyS']) this.controls.moveForward(-speed);
-            if (this.keys['KeyA']) this.controls.moveRight(-speed);
-            if (this.keys['KeyD']) this.controls.moveRight(speed);
+            if (this.keys['KeyW'] && !this.checkCollision(forward)) this.controls.moveForward(speed);
+            if (this.keys['KeyS'] && !this.checkCollision(forward.clone().negate())) this.controls.moveForward(-speed);
+            if (this.keys['KeyA'] && !this.checkCollision(right.clone().negate())) this.controls.moveRight(-speed);
+            if (this.keys['KeyD'] && !this.checkCollision(right)) this.controls.moveRight(speed);
 
-            // ЗАСТОСУВАННЯ ПАДІННЯ
             this.camera.position.y += this.velocity.y * delta;
 
-            // КОЛІЗІЯ З ПІДЛОГОЮ (Тут магія!)
-            // Ми беремо висоту блоків (приблизно 4) + твій зріст
-            if (this.camera.position.y < 5.5) { 
+            // КОЛІЗІЯ З ПІДЛОГОЮ (Динамічна)
+            const downRay = new THREE.Raycaster(this.camera.position, new THREE.Vector3(0, -1, 0));
+            const groundHits = downRay.intersectObjects(this.scene.children);
+
+            if (groundHits.length > 0 && groundHits[0].distance < this.playerHeight) {
                 this.velocity.y = 0;
-                this.camera.position.y = 5.5;
+                this.camera.position.y += (this.playerHeight - groundHits[0].distance);
                 this.canJump = true;
+            } else {
+                this.canJump = false;
             }
 
-            // СТРИБОК
             if (this.keys['Space'] && this.canJump) {
-                this.velocity.y = 10.0; // Сила стрибка
-                this.canJump = false;
+                this.velocity.y = 9.0;
             }
         }
 
