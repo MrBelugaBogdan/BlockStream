@@ -5,7 +5,7 @@ export class GameEngine {
     constructor() {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x70a1ff);
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 150);
         this.renderer = new THREE.WebGLRenderer({ antialias: false });
         
         this.controls = new PointerLockControls(this.camera, document.body);
@@ -17,9 +17,9 @@ export class GameEngine {
         this.canJump = false;
         this.playerHeight = 1.7;
 
-        this.chunks = new Map(); // Зберігаємо блоки тут
-        this.chunkSize = 8; // Менші чанки для кращої пам'яті
-        this.renderDistance = 2; 
+        this.chunks = new Map();
+        this.chunkSize = 8;
+        this.renderDistance = 3; // Можна трохи збільшити, бо оптимізація гуд
         
         this.blockGeo = new THREE.BoxGeometry(1, 1, 1);
         this.selectedBlock = 'grass';
@@ -32,13 +32,22 @@ export class GameEngine {
 
         this.scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
+        // ТЕКСТУРИ (Додай wood.png та leaves.png в папку assets!)
         const grassTex = this.loader.load('./assets/grass.png');
         const stoneTex = this.loader.load('./assets/stone.png');
-        [grassTex, stoneTex].forEach(t => { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; });
+        const woodTex = this.loader.load('./assets/wood.png');
+        const leavesTex = this.loader.load('./assets/leaves.png');
+
+        [grassTex, stoneTex, woodTex, leavesTex].forEach(t => { 
+            t.magFilter = THREE.NearestFilter; 
+            t.minFilter = THREE.NearestFilter; 
+        });
 
         this.mats = {
             grass: new THREE.MeshLambertMaterial({ map: grassTex }),
-            stone: new THREE.MeshLambertMaterial({ map: stoneTex })
+            stone: new THREE.MeshLambertMaterial({ map: stoneTex }),
+            wood: new THREE.MeshLambertMaterial({ map: woodTex }),
+            leaves: new THREE.MeshLambertMaterial({ map: leavesTex })
         };
 
         this.updateChunks();
@@ -47,43 +56,72 @@ export class GameEngine {
             this.keys[e.code] = true;
             if (e.code === 'Digit1') this.selectedBlock = 'grass';
             if (e.code === 'Digit2') this.selectedBlock = 'stone';
+            if (e.code === 'Digit3') this.selectedBlock = 'wood';
         });
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
         
         document.addEventListener('mousedown', (e) => {
-            if (this.controls.isLocked) {
-                this.interact(e.button === 0); // true для ЛКМ (ламати), false для ПКМ (ставити)
-            } else {
-                this.controls.lock();
-            }
+            if (this.controls.isLocked) this.interact(e.button === 0);
+            else this.controls.lock();
         });
 
-        this.camera.position.set(4, 15, 4);
+        this.camera.position.set(4, 20, 4);
         this.animate();
+    }
+
+    createTree(x, y, z) {
+        // Стовбур (3 блоки)
+        for (let i = 1; i <= 3; i++) {
+            const log = new THREE.Mesh(this.blockGeo, this.mats.wood);
+            log.position.set(x, y + i, z);
+            log.name = "voxel";
+            this.scene.add(log);
+        }
+        // Листя (проста шапка 3x3)
+        for (let lx = -1; lx <= 1; lx++) {
+            for (let lz = -1; lz <= 1; lz++) {
+                for (let ly = 4; ly <= 5; ly++) {
+                    const leaf = new THREE.Mesh(this.blockGeo, this.mats.leaves);
+                    leaf.position.set(x + lx, y + ly, z + lz);
+                    leaf.name = "voxel";
+                    this.scene.add(leaf);
+                }
+            }
+        }
     }
 
     createChunk(cx, cz) {
         const key = `${cx},${cz}`;
         if (this.chunks.has(key)) return;
 
-        const blocks = [];
         for (let x = 0; x < this.chunkSize; x++) {
             for (let z = 0; z < this.chunkSize; z++) {
                 const wx = cx * this.chunkSize + x;
                 const wz = cz * this.chunkSize + z;
                 
-                // Генерація ландшафту
-                const h = Math.floor(Math.abs(Math.sin(wx * 0.2) * Math.cos(wz * 0.2)) * 4) + 5;
+                const h = Math.floor(Math.abs(Math.sin(wx * 0.1) * Math.cos(wz * 0.1)) * 4) + 5;
 
-                // Тільки видимий шар
-                const block = new THREE.Mesh(this.blockGeo, this.mats.grass);
-                block.position.set(wx, h, wz);
-                block.name = "voxel";
-                this.scene.add(block);
-                blocks.push(block);
+                // Створюємо траву
+                const grass = new THREE.Mesh(this.blockGeo, this.mats.grass);
+                grass.position.set(wx, h, wz);
+                grass.name = "voxel";
+                this.scene.add(grass);
+
+                // Створюємо КАМІНЬ під травою (2 шари)
+                for (let sy = 1; sy <= 2; sy++) {
+                    const stone = new THREE.Mesh(this.blockGeo, this.mats.stone);
+                    stone.position.set(wx, h - sy, wz);
+                    stone.name = "voxel";
+                    this.scene.add(stone);
+                }
+
+                // Шанс на дерево (тільки на траві)
+                if (Math.random() < 0.02) { 
+                    this.createTree(wx, h, wz);
+                }
             }
         }
-        this.chunks.set(key, blocks);
+        this.chunks.set(key, true);
     }
 
     updateChunks() {
@@ -100,19 +138,15 @@ export class GameEngine {
     interact(isBreaking) {
         this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
         const intersects = this.raycaster.intersectObjects(this.scene.children);
-
-        if (intersects.length > 0) {
-            const hit = intersects[0];
-            if (hit.object.name === "voxel") {
-                if (isBreaking) {
-                    this.scene.remove(hit.object);
-                } else {
-                    const pos = hit.object.position.clone().add(hit.face.normal);
-                    const newBlock = new THREE.Mesh(this.blockGeo, this.mats[this.selectedBlock]);
-                    newBlock.position.copy(pos);
-                    newBlock.name = "voxel";
-                    this.scene.add(newBlock);
-                }
+        if (intersects.length > 0 && intersects[0].object.name === "voxel") {
+            if (isBreaking) {
+                this.scene.remove(intersects[0].object);
+            } else {
+                const pos = intersects[0].object.position.clone().add(intersects[0].face.normal);
+                const newBlock = new THREE.Mesh(this.blockGeo, this.mats[this.selectedBlock]);
+                newBlock.position.copy(pos);
+                newBlock.name = "voxel";
+                this.scene.add(newBlock);
             }
         }
     }
@@ -132,7 +166,6 @@ export class GameEngine {
 
             this.camera.position.y += this.velocity.y * delta;
 
-            // РЕАЛЬНА КОЛІЗІЯ (Down Ray)
             const ray = new THREE.Raycaster(this.camera.position, new THREE.Vector3(0, -1, 0));
             const hits = ray.intersectObjects(this.scene.children);
 
@@ -145,9 +178,7 @@ export class GameEngine {
             }
 
             if (this.keys['Space'] && this.canJump) this.velocity.y = 9;
-
-            // Оновлюємо чанки кожні 4 блоки руху
-            if (Math.floor(this.camera.position.x) % 4 === 0) this.updateChunks();
+            if (Math.abs(this.camera.position.x % 4) < 0.2 || Math.abs(this.camera.position.z % 4) < 0.2) this.updateChunks();
         }
         this.renderer.render(this.scene, this.camera);
     }
