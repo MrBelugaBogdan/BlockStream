@@ -1,8 +1,6 @@
-// Перевірка наявності ядра перед запуском
-if (window.GameEngine) {
-    const engine = new window.GameEngine();
-    engine.init();
-    console.log("BlockStream Engine запущено успішно!");
-} else {
-    console.error("Помилка: GameEngine не знайдено. Перевірте engine.js");
-}
+import { GameEngine } from './engine.js';
+
+const engine = new GameEngine();
+engine.init();
+
+console.log("BlockStream High-Performance Engine: Active");
