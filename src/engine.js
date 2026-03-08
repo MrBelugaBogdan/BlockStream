@@ -10,13 +10,17 @@ export class GameEngine {
         
         this.controls = new PointerLockControls(this.camera, document.body);
         this.keys = {};
-        this.raycaster = new THREE.Raycaster(); // Для ламання блоків
-        this.collisionRaycaster = new THREE.Raycaster(); // Для стін
+        this.raycaster = new THREE.Raycaster();
+        this.collisionRaycaster = new THREE.Raycaster();
         this.loader = new THREE.TextureLoader();
 
         this.velocity = new THREE.Vector3(); 
         this.canJump = false;
-        this.playerHeight = 1.7; // Зріст гравця
+        this.playerHeight = 1.7;
+        
+        // СИСТЕМА ІНВЕНТАРЮ
+        this.selectedBlock = 'grass'; // Початковий блок
+        this.materials = {};
     }
 
     init() {
@@ -29,33 +33,45 @@ export class GameEngine {
         sun.position.set(10, 20, 10);
         this.scene.add(sun);
 
+        // ТЕКСТУРИ
         const grassTex = this.loader.load('./assets/grass.png');
         const stoneTex = this.loader.load('./assets/stone.png');
         [grassTex, stoneTex].forEach(t => { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; });
 
-        this.createWorld(grassTex, stoneTex);
+        this.materials = {
+            grass: new THREE.MeshStandardMaterial({ map: grassTex }),
+            stone: new THREE.MeshStandardMaterial({ map: stoneTex })
+        };
 
-        document.addEventListener('keydown', (e) => this.keys[e.code] = true);
+        this.createWorld();
+
+        document.addEventListener('keydown', (e) => {
+            this.keys[e.code] = true;
+            if (e.code === 'Digit1') this.selectedBlock = 'grass';
+            if (e.code === 'Digit2') this.selectedBlock = 'stone';
+        });
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
+        
         document.addEventListener('mousedown', (e) => {
-            if (this.controls.isLocked && e.button === 0) this.interact(); 
-            else this.controls.lock();
+            if (this.controls.isLocked) {
+                if (e.button === 0) this.interact(true); // ЛКМ - Ламати
+                if (e.button === 2) this.interact(false); // ПКМ - Ставити
+            } else {
+                this.controls.lock();
+            }
         });
 
         this.camera.position.set(8, 10, 8);
         this.animate();
     }
 
-    createWorld(grassTex, stoneTex) {
+    createWorld() {
         const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const grassMat = new THREE.MeshStandardMaterial({ map: grassTex });
-        const stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex });
-
         for (let x = 0; x < 16; x++) {
             for (let z = 0; z < 16; z++) {
                 const height = Math.floor(Math.random() * 2) + 2;
                 for (let y = 0; y <= height; y++) {
-                    const block = new THREE.Mesh(geometry, y === height ? grassMat : stoneMat);
+                    const block = new THREE.Mesh(geometry, y === height ? this.materials.grass : this.materials.stone);
                     block.position.set(x, y, z);
                     block.name = "voxel";
                     this.scene.add(block);
@@ -64,13 +80,27 @@ export class GameEngine {
         }
     }
 
-    interact() {
+    interact(isBreaking) {
         this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
         const intersects = this.raycaster.intersectObjects(this.scene.children);
-        if (intersects.length > 0) this.scene.remove(intersects[0].object);
+
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            if (hit.object.name === "voxel") {
+                if (isBreaking) {
+                    this.scene.remove(hit.object);
+                } else {
+                    // БУДІВНИЦТВО: додаємо вектор нормалі до позиції блока
+                    const pos = hit.object.position.clone().add(hit.face.normal);
+                    const newBlock = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.materials[this.selectedBlock]);
+                    newBlock.position.copy(pos);
+                    newBlock.name = "voxel";
+                    this.scene.add(newBlock);
+                }
+            }
+        }
     }
 
-    // Перевірка, чи є блок у напрямку руху
     checkCollision(vector) {
         this.collisionRaycaster.set(this.camera.position, vector);
         const intersects = this.collisionRaycaster.intersectObjects(this.scene.children);
@@ -79,19 +109,15 @@ export class GameEngine {
 
     animate() {
         requestAnimationFrame(() => this.animate());
-
         if (this.controls.isLocked) {
             const delta = 0.016;
-            this.velocity.y -= 25.0 * delta; // Гравітація
+            this.velocity.y -= 25.0 * delta;
 
-            // Напрямки для перевірки колізій
             const forward = new THREE.Vector3();
             this.camera.getWorldDirection(forward);
             forward.y = 0; forward.normalize();
-
             const right = new THREE.Vector3().crossVectors(this.camera.up, forward).negate();
 
-            // РУХ З ПЕРЕВІРКОЮ СТІН
             const speed = 0.12;
             if (this.keys['KeyW'] && !this.checkCollision(forward)) this.controls.moveForward(speed);
             if (this.keys['KeyS'] && !this.checkCollision(forward.clone().negate())) this.controls.moveForward(-speed);
@@ -100,7 +126,6 @@ export class GameEngine {
 
             this.camera.position.y += this.velocity.y * delta;
 
-            // КОЛІЗІЯ З ПІДЛОГОЮ (Динамічна)
             const downRay = new THREE.Raycaster(this.camera.position, new THREE.Vector3(0, -1, 0));
             const groundHits = downRay.intersectObjects(this.scene.children);
 
@@ -112,11 +137,8 @@ export class GameEngine {
                 this.canJump = false;
             }
 
-            if (this.keys['Space'] && this.canJump) {
-                this.velocity.y = 9.0;
-            }
+            if (this.keys['Space'] && this.canJump) this.velocity.y = 9.0;
         }
-
         this.renderer.render(this.scene, this.camera);
     }
 }
