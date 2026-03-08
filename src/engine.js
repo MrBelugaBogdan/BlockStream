@@ -5,24 +5,27 @@ export class GameEngine {
     constructor() {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x70a1ff);
-        // Зменшуємо дальність промальовування для економії пам'яті
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
-        this.renderer = new THREE.WebGLRenderer({ antialias: false }); 
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        this.renderer = new THREE.WebGLRenderer({ antialias: false });
         
         this.controls = new PointerLockControls(this.camera, document.body);
         this.keys = {};
+        this.raycaster = new THREE.Raycaster();
         this.loader = new THREE.TextureLoader();
 
-        this.velocity = new THREE.Vector3(); 
-        this.playerHeight = 1.8;
+        this.velocity = new THREE.Vector3();
+        this.canJump = false;
+        this.playerHeight = 1.7;
+
+        this.chunks = new Map(); // Зберігаємо блоки тут
+        this.chunkSize = 8; // Менші чанки для кращої пам'яті
+        this.renderDistance = 2; 
         
-        this.chunks = {};
-        this.chunkSize = 16;
-        this.renderDistance = 1; // 1 чанк навколо — ідеально для слабких телефонів
+        this.blockGeo = new THREE.BoxGeometry(1, 1, 1);
+        this.selectedBlock = 'grass';
     }
 
     init() {
-        // Вимикаємо високу чіткість для швидкості на мобільних
         this.renderer.setPixelRatio(1);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(this.renderer.domElement);
@@ -31,11 +34,7 @@ export class GameEngine {
 
         const grassTex = this.loader.load('./assets/grass.png');
         const stoneTex = this.loader.load('./assets/stone.png');
-        
-        [grassTex, stoneTex].forEach(t => { 
-            t.magFilter = THREE.NearestFilter; 
-            t.minFilter = THREE.NearestFilter; 
-        });
+        [grassTex, stoneTex].forEach(t => { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; });
 
         this.mats = {
             grass: new THREE.MeshLambertMaterial({ map: grassTex }),
@@ -44,48 +43,47 @@ export class GameEngine {
 
         this.updateChunks();
 
-        document.addEventListener('keydown', (e) => this.keys[e.code] = true);
+        document.addEventListener('keydown', (e) => {
+            this.keys[e.code] = true;
+            if (e.code === 'Digit1') this.selectedBlock = 'grass';
+            if (e.code === 'Digit2') this.selectedBlock = 'stone';
+        });
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
-        document.addEventListener('click', () => this.controls.lock());
+        
+        document.addEventListener('mousedown', (e) => {
+            if (this.controls.isLocked) {
+                this.interact(e.button === 0); // true для ЛКМ (ламати), false для ПКМ (ставити)
+            } else {
+                this.controls.lock();
+            }
+        });
 
-        this.camera.position.set(8, 25, 8);
+        this.camera.position.set(4, 15, 4);
         this.animate();
     }
 
     createChunk(cx, cz) {
         const key = `${cx},${cz}`;
-        if (this.chunks[key]) return;
+        if (this.chunks.has(key)) return;
 
-        const count = this.chunkSize * this.chunkSize;
-        // Правильне створення InstancedMesh
-        const grassMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.mats.grass, count);
-        const stoneMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.mats.stone, count);
-
-        const matrix = new THREE.Matrix4();
-        let gIdx = 0;
-        let sIdx = 0;
-
+        const blocks = [];
         for (let x = 0; x < this.chunkSize; x++) {
             for (let z = 0; z < this.chunkSize; z++) {
-                const worldX = cx * this.chunkSize + x;
-                const worldZ = cz * this.chunkSize + z;
+                const wx = cx * this.chunkSize + x;
+                const wz = cz * this.chunkSize + z;
                 
-                // Генерація ландшафту (як у MultiCraft)
-                const h = Math.floor(Math.abs(Math.sin(worldX * 0.1) * Math.cos(worldZ * 0.1)) * 5) + 10;
+                // Генерація ландшафту
+                const h = Math.floor(Math.abs(Math.sin(wx * 0.2) * Math.cos(wz * 0.2)) * 4) + 5;
 
-                // Трава зверху
-                matrix.setPosition(worldX, h, worldZ);
-                grassMesh.setMatrixAt(gIdx++, matrix);
-
-                // Тільки ОДИН шар каменю під травою для економії FPS
-                matrix.setPosition(worldX, h - 1, worldZ);
-                stoneMesh.setMatrixAt(sIdx++, matrix);
+                // Тільки видимий шар
+                const block = new THREE.Mesh(this.blockGeo, this.mats.grass);
+                block.position.set(wx, h, wz);
+                block.name = "voxel";
+                this.scene.add(block);
+                blocks.push(block);
             }
         }
-
-        this.scene.add(grassMesh);
-        this.scene.add(stoneMesh);
-        this.chunks[key] = { grassMesh, stoneMesh };
+        this.chunks.set(key, blocks);
     }
 
     updateChunks() {
@@ -95,6 +93,26 @@ export class GameEngine {
         for (let x = -this.renderDistance; x <= this.renderDistance; x++) {
             for (let z = -this.renderDistance; z <= this.renderDistance; z++) {
                 this.createChunk(pCX + x, pCZ + z);
+            }
+        }
+    }
+
+    interact(isBreaking) {
+        this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+        const intersects = this.raycaster.intersectObjects(this.scene.children);
+
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            if (hit.object.name === "voxel") {
+                if (isBreaking) {
+                    this.scene.remove(hit.object);
+                } else {
+                    const pos = hit.object.position.clone().add(hit.face.normal);
+                    const newBlock = new THREE.Mesh(this.blockGeo, this.mats[this.selectedBlock]);
+                    newBlock.position.copy(pos);
+                    newBlock.name = "voxel";
+                    this.scene.add(newBlock);
+                }
             }
         }
     }
@@ -114,17 +132,22 @@ export class GameEngine {
 
             this.camera.position.y += this.velocity.y * delta;
 
-            // Спрощена "швидка" колізія з підлогою
-            if (this.camera.position.y < 16) {
+            // РЕАЛЬНА КОЛІЗІЯ (Down Ray)
+            const ray = new THREE.Raycaster(this.camera.position, new THREE.Vector3(0, -1, 0));
+            const hits = ray.intersectObjects(this.scene.children);
+
+            if (hits.length > 0 && hits[0].distance < this.playerHeight) {
                 this.velocity.y = 0;
-                this.camera.position.y = 16;
-                if (this.keys['Space']) this.velocity.y = 9;
+                this.camera.position.y += (this.playerHeight - hits[0].distance);
+                this.canJump = true;
+            } else {
+                this.canJump = false;
             }
 
-            // Перевіряємо чанки тільки при переході межі
-            if (Math.floor(this.camera.position.x) % 16 === 0) {
-                this.updateChunks();
-            }
+            if (this.keys['Space'] && this.canJump) this.velocity.y = 9;
+
+            // Оновлюємо чанки кожні 4 блоки руху
+            if (Math.floor(this.camera.position.x) % 4 === 0) this.updateChunks();
         }
         this.renderer.render(this.scene, this.camera);
     }
