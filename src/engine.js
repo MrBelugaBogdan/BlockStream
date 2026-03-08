@@ -4,7 +4,7 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 export class GameEngine {
     constructor() {
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x70a1ff);
+        this.scene.background = new THREE.Color(0x70a1ff); // Небо
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         
@@ -12,22 +12,29 @@ export class GameEngine {
         this.keys = {};
         this.raycaster = new THREE.Raycaster();
         this.loader = new THREE.TextureLoader();
+
+        // ФІЗИКА
+        this.velocity = new THREE.Vector3(); 
+        this.canJump = false;
     }
 
     init() {
+        this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(this.renderer.domElement);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(10, 20, 10);
-        this.scene.add(light);
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        // Світло
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        this.scene.add(ambientLight);
+        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+        sun.position.set(10, 20, 10);
+        this.scene.add(sun);
 
-        // Шляхи до твоїх текстур (завантаж їх у папку assets на GitHub)
+        // Завантаження твоїх текстур з папки assets
         const grassTex = this.loader.load('./assets/grass.png');
         const stoneTex = this.loader.load('./assets/stone.png');
 
-        // Налаштування, щоб текстури не були розмитими (піксель-арт стиль)
+        // Робимо пікселі чіткими (Pixel Art style)
         [grassTex, stoneTex].forEach(t => {
             t.magFilter = THREE.NearestFilter;
             t.minFilter = THREE.NearestFilter;
@@ -35,18 +42,19 @@ export class GameEngine {
 
         this.createWorld(grassTex, stoneTex);
 
-        // Події
+        // Обробка клавіш та миші
         document.addEventListener('keydown', (e) => this.keys[e.code] = true);
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
+        
         document.addEventListener('click', () => {
             if (this.controls.isLocked) {
-                this.breakBlock();
+                this.interact(true); // Лівий клік — ламаємо блок
             } else {
-                this.controls.lock();
+                this.controls.lock(); 
             }
         });
 
-        this.camera.position.set(8, 5, 20);
+        this.camera.position.set(8, 10, 20);
         this.animate();
     }
 
@@ -57,9 +65,9 @@ export class GameEngine {
 
         for (let x = 0; x < 16; x++) {
             for (let z = 0; z < 16; z++) {
-                const h = Math.floor(Math.random() * 2) + 2;
-                for (let y = 0; y <= h; y++) {
-                    const block = new THREE.Mesh(geometry, y === h ? grassMat : stoneMat);
+                const height = Math.floor(Math.random() * 2) + 2;
+                for (let y = 0; y <= height; y++) {
+                    const block = new THREE.Mesh(geometry, y === height ? grassMat : stoneMat);
                     block.position.set(x, y, z);
                     block.name = "voxel";
                     this.scene.add(block);
@@ -68,23 +76,51 @@ export class GameEngine {
         }
     }
 
-    breakBlock() {
+    interact(isBreaking) {
         this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
         const intersects = this.raycaster.intersectObjects(this.scene.children);
-        if (intersects.length > 0 && intersects[0].object.name === "voxel") {
-            this.scene.remove(intersects[0].object);
+
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            if (hit.object.name === "voxel" && isBreaking) {
+                this.scene.remove(hit.object);
+            }
         }
     }
 
     animate() {
         requestAnimationFrame(() => this.animate());
+
         if (this.controls.isLocked) {
-            const s = 0.15;
-            if (this.keys['KeyW']) this.controls.moveForward(s);
-            if (this.keys['KeyS']) this.controls.moveForward(-s);
-            if (this.keys['KeyA']) this.controls.moveRight(-s);
-            if (this.keys['KeyD']) this.controls.moveRight(s);
+            const time = 0.016; // Приблизно 60 FPS
+            
+            // Гравітація (падіння)
+            this.velocity.y -= 25.0 * time; 
+
+            // Рух WASD
+            const speed = 0.15;
+            if (this.keys['KeyW']) this.controls.moveForward(speed);
+            if (this.keys['KeyS']) this.controls.moveForward(-speed);
+            if (this.keys['KeyA']) this.controls.moveRight(-speed);
+            if (this.keys['KeyD']) this.controls.moveRight(speed);
+
+            // Застосовуємо вертикальну швидкість
+            this.camera.position.y += this.velocity.y * time;
+
+            // Проста колізія з підлогою (висота 4 блоки)
+            if (this.camera.position.y < 4) {
+                this.velocity.y = 0;
+                this.camera.position.y = 4;
+                this.canJump = true;
+            }
+
+            // Стрибок на Space
+            if (this.keys['Space'] && this.canJump) {
+                this.velocity.y = 8.0; 
+                this.canJump = false;
+            }
         }
+
         this.renderer.render(this.scene, this.camera);
     }
 }
