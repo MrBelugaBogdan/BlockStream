@@ -3,4 +3,4 @@ import { GameEngine } from './engine.js';
 const engine = new GameEngine();
 engine.init();
 
-console.log("BlockStream High-Performance Engine: Active");
+console.log("BlockStream: Ядро запущено успішно!");
