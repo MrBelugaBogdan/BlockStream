@@ -1,6 +1,9 @@
 import { GameEngine } from './engine.js';
 
-const engine = new GameEngine();
-engine.init();
+const game = new GameEngine();
+game.init().catch(err => console.error("Помилка запуску:", err));
 
-console.log("BlockStream: Ядро запущено успішно!");
+// Клік для входу в гру
+document.addEventListener('click', () => {
+    game.controls.lock();
+});
