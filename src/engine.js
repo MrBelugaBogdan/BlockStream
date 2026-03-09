@@ -15,44 +15,30 @@ export class GameEngine {
         this.loader = new THREE.TextureLoader();
 
         this.velocity = new THREE.Vector3();
-        this.canJump = false;
         this.playerHeight = 1.7;
-
         this.chunks = new Map();
         this.chunkSize = 8;
-        this.renderDistance = 2; // Оптимально для телефонів
-        
-        this.blockGeo = new THREE.BoxGeometry(1, 1, 1);
-        this.selectedBlock = 'grass';
+        this.renderDistance = 2;
+        this.currentWorld = null;
+        this.savedChanges = {}; // Тут зберігаємо зміни блоків { "x,y,z": "type" }
     }
 
     init() {
         this.renderer.setPixelRatio(1);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(this.renderer.domElement);
-
         this.scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-        // ТЕКСТУРИ
-        const grassTex = this.loader.load('./assets/grass.png');
-        const stoneTex = this.loader.load('./assets/stone.png');
-        const woodTex = this.loader.load('./assets/wood.png');
-        const leavesTex = this.loader.load('./assets/leaves.png');
-
-        [grassTex, stoneTex, woodTex, leavesTex].forEach(t => { 
-            t.magFilter = THREE.NearestFilter; 
-            t.minFilter = THREE.NearestFilter; 
+        // Завантаження текстур (додай свої wood.png, leaves.png і т.д.)
+        const texNames = ['grass', 'stone', 'wood', 'leaves'];
+        this.mats = {};
+        texNames.forEach(name => {
+            const t = this.loader.load(`./assets/${name}.png`);
+            t.magFilter = t.minFilter = THREE.NearestFilter;
+            this.mats[name] = new THREE.MeshLambertMaterial({ map: t });
         });
 
-        this.mats = {
-            grass: new THREE.MeshLambertMaterial({ map: grassTex }),
-            stone: new THREE.MeshLambertMaterial({ map: stoneTex }),
-            wood: new THREE.MeshLambertMaterial({ map: woodTex }),
-            leaves: new THREE.MeshLambertMaterial({ map: leavesTex })
-        };
-
-        this.createMenu();
-        this.updateChunks();
+        this.createWorldMenu(); // Запускаємо вибір серверів
 
         document.addEventListener('keydown', (e) => {
             this.keys[e.code] = true;
@@ -63,57 +49,70 @@ export class GameEngine {
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
         
         document.addEventListener('mousedown', (e) => {
-            if (this.controls.isLocked) {
-                this.interact(e.button === 0);
-            }
+            if (this.controls.isLocked) this.interact(e.button === 0);
         });
 
-        this.camera.position.set(4, 20, 4);
         this.animate();
     }
 
-    createMenu() {
+    createWorldMenu() {
         const menu = document.createElement('div');
-        menu.id = 'main-menu';
-        menu.style = `
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(20, 20, 20, 0.9); display: flex; flex-direction: column;
-            justify-content: center; align-items: center; z-index: 100;
-            color: white; font-family: 'Courier New', Courier, monospace;
-        `;
-        menu.innerHTML = `
-            <h1 style="font-size: 3rem; margin-bottom: 20px; color: #4CAF50;">BLOCKSTREAM</h1>
-            <button id="start-btn" style="padding: 15px 50px; font-size: 24px; background: #4CAF50; color: white; border: none; cursor: pointer; border-radius: 5px;">ГРАТИ</button>
-            <div style="margin-top: 30px; text-align: center; line-height: 1.6;">
-                <p>WASD — Рух | Space — Стрибок</p>
-                <p>ЛКМ — Ламати | ПКМ — Ставити</p>
-                <p>1, 2, 3 — Вибір блоку</p>
-            </div>
-        `;
+        menu.id = 'world-menu';
+        menu.style = `position:absolute;top:0;left:0;width:100%;height:100%;background:#1a1a1a;color:white;display:flex;flex-direction:column;align-items:center;z-index:200;padding:50px;font-family:monospace;`;
+        
+        this.renderWorldList(menu);
         document.body.appendChild(menu);
-
-        document.getElementById('start-btn').onclick = () => {
-            menu.style.display = 'none';
-            this.controls.lock();
-        };
     }
 
-    createTree(x, y, z) {
-        for (let i = 1; i <= 3; i++) {
-            const log = new THREE.Mesh(this.blockGeo, this.mats.wood);
-            log.position.set(x, y + i, z);
-            log.name = "voxel";
-            this.scene.add(log);
-        }
-        for (let lx = -1; lx <= 1; lx++) {
-            for (let lz = -1; lz <= 1; lz++) {
-                for (let ly = 4; ly <= 5; ly++) {
-                    const leaf = new THREE.Mesh(this.blockGeo, this.mats.leaves);
-                    leaf.position.set(x + lx, y + ly, z + lz);
-                    leaf.name = "voxel";
-                    this.scene.add(leaf);
-                }
+    renderWorldList(container) {
+        const worlds = JSON.parse(localStorage.getItem('blockstream_worlds') || '[]');
+        container.innerHTML = `<h1>BLOCKSTREAM: СЕРВЕРИ</h1>`;
+        
+        const list = document.createElement('div');
+        list.style = "width:300px; max-height:400px; overflow-y:auto; margin:20px;";
+        
+        worlds.forEach(name => {
+            const btn = document.createElement('button');
+            btn.innerText = `Увійти: ${name}`;
+            btn.style = "width:100%; padding:10px; margin:5px; cursor:pointer; background:#4CAF50; color:white; border:none;";
+            btn.onclick = () => this.startWorld(name);
+            list.appendChild(btn);
+        });
+
+        const input = document.createElement('input');
+        input.placeholder = "Назва нового світу...";
+        input.style = "padding:10px; width:200px;";
+        
+        const createBtn = document.createElement('button');
+        createBtn.innerText = "СТВОРИТИ СВІТ";
+        createBtn.style = "padding:10px; background:white; cursor:pointer;";
+        createBtn.onclick = () => {
+            if(input.value) {
+                worlds.push(input.value);
+                localStorage.setItem('blockstream_worlds', JSON.stringify(worlds));
+                this.renderWorldList(container);
             }
+        };
+
+        container.appendChild(list);
+        container.appendChild(input);
+        container.appendChild(createBtn);
+    }
+
+    startWorld(name) {
+        this.currentWorld = name;
+        this.savedChanges = JSON.parse(localStorage.getItem(`world_${name}`) || '{}');
+        document.getElementById('world-menu').remove();
+        
+        // Початкова позиція
+        this.camera.position.set(4, 20, 4);
+        this.updateChunks();
+        this.controls.lock();
+    }
+
+    save() {
+        if(this.currentWorld) {
+            localStorage.setItem(`world_${this.currentWorld}`, JSON.stringify(this.savedChanges));
         }
     }
 
@@ -125,32 +124,55 @@ export class GameEngine {
             for (let z = 0; z < this.chunkSize; z++) {
                 const wx = cx * this.chunkSize + x;
                 const wz = cz * this.chunkSize + z;
+                
+                // Перевірка збережених змін
                 const h = Math.floor(Math.abs(Math.sin(wx * 0.1) * Math.cos(wz * 0.1)) * 4) + 5;
-
-                const grass = new THREE.Mesh(this.blockGeo, this.mats.grass);
-                grass.position.set(wx, h, wz);
-                grass.name = "voxel";
-                this.scene.add(grass);
-
-                for (let sy = 1; sy <= 2; sy++) {
-                    const stone = new THREE.Mesh(this.blockGeo, this.mats.stone);
-                    stone.position.set(wx, h - sy, wz);
-                    stone.name = "voxel";
-                    this.scene.add(stone);
-                }
-
-                if (Math.random() < 0.03) { 
-                    this.createTree(wx, h, wz);
-                }
+                
+                // Якщо блок було видалено або замінено - логіка тут (спрощено)
+                this.addBlock(wx, h, wz, 'grass');
+                this.addBlock(wx, h-1, wz, 'stone');
             }
         }
         this.chunks.set(key, true);
     }
 
+    addBlock(x, y, z, type) {
+        const blockKey = `${x},${y},${z}`;
+        if (this.savedChanges[blockKey] === 'air') return;
+        
+        const finalType = this.savedChanges[blockKey] || type;
+        const block = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), this.mats[finalType]);
+        block.position.set(x, y, z);
+        block.name = "voxel";
+        block.userData = { type: finalType };
+        this.scene.add(block);
+    }
+
+    interact(isBreaking) {
+        this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+        const intersects = this.raycaster.intersectObjects(this.scene.children);
+        if (intersects.length > 0) {
+            const obj = intersects[0].object;
+            const pos = obj.position;
+            const blockKey = `${pos.x},${pos.y},${pos.z}`;
+
+            if (isBreaking) {
+                this.savedChanges[blockKey] = 'air';
+                this.scene.remove(obj);
+            } else {
+                const newPos = pos.clone().add(intersects[0].face.normal);
+                const newKey = `${newPos.x},${newPos.y},${newPos.z}`;
+                this.savedChanges[newKey] = this.selectedBlock;
+                this.addBlock(newPos.x, newPos.y, newPos.z, this.selectedBlock);
+            }
+            this.save(); // Зберігаємо після кожного кліку
+        }
+    }
+
+    // Решта методів (animate, updateChunks, checkCollision) залишаються як у попередньому коді
     updateChunks() {
         const pCX = Math.floor(this.camera.position.x / this.chunkSize);
         const pCZ = Math.floor(this.camera.position.z / this.chunkSize);
-
         for (let x = -this.renderDistance; x <= this.renderDistance; x++) {
             for (let z = -this.renderDistance; z <= this.renderDistance; z++) {
                 this.createChunk(pCX + x, pCZ + z);
@@ -164,55 +186,31 @@ export class GameEngine {
         return intersects.length > 0 && intersects[0].distance < 1.0;
     }
 
-    interact(isBreaking) {
-        this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-        const intersects = this.raycaster.intersectObjects(this.scene.children);
-        if (intersects.length > 0 && intersects[0].object.name === "voxel") {
-            if (isBreaking) {
-                this.scene.remove(intersects[0].object);
-            } else {
-                const pos = intersects[0].object.position.clone().add(intersects[0].face.normal);
-                const newBlock = new THREE.Mesh(this.blockGeo, this.mats[this.selectedBlock]);
-                newBlock.position.copy(pos);
-                newBlock.name = "voxel";
-                this.scene.add(newBlock);
-            }
-        }
-    }
-
     animate() {
         requestAnimationFrame(() => this.animate());
-
         if (this.controls.isLocked) {
             const delta = 0.016;
             this.velocity.y -= 25.0 * delta;
-
+            
             const forward = new THREE.Vector3();
-            this.camera.getWorldDirection(forward);
-            forward.y = 0; forward.normalize();
+            this.camera.getWorldDirection(forward); forward.y = 0; forward.normalize();
             const right = new THREE.Vector3().crossVectors(this.camera.up, forward).negate();
 
-            const speed = 0.15;
-            if (this.keys['KeyW'] && !this.checkCollision(forward)) this.controls.moveForward(speed);
-            if (this.keys['KeyS'] && !this.checkCollision(forward.clone().negate())) this.controls.moveForward(-speed);
-            if (this.keys['KeyA'] && !this.checkCollision(right.clone().negate())) this.controls.moveRight(-speed);
-            if (this.keys['KeyD'] && !this.checkCollision(right)) this.controls.moveRight(speed);
+            if (this.keys['KeyW'] && !this.checkCollision(forward)) this.controls.moveForward(0.15);
+            if (this.keys['KeyS'] && !this.checkCollision(forward.clone().negate())) this.controls.moveForward(-0.15);
+            if (this.keys['KeyA'] && !this.checkCollision(right.clone().negate())) this.controls.moveRight(-0.15);
+            if (this.keys['KeyD'] && !this.checkCollision(right)) this.controls.moveRight(0.15);
 
             this.camera.position.y += this.velocity.y * delta;
-
             const ray = new THREE.Raycaster(this.camera.position, new THREE.Vector3(0, -1, 0));
             const hits = ray.intersectObjects(this.scene.children);
-
             if (hits.length > 0 && hits[0].distance < this.playerHeight) {
                 this.velocity.y = 0;
                 this.camera.position.y += (this.playerHeight - hits[0].distance);
                 this.canJump = true;
-            } else {
-                this.canJump = false;
-            }
-
+            } else { this.canJump = false; }
             if (this.keys['Space'] && this.canJump) this.velocity.y = 9;
-            if (Math.abs(this.camera.position.x % 4) < 0.2 || Math.abs(this.camera.position.z % 4) < 0.2) this.updateChunks();
+            this.updateChunks();
         }
         this.renderer.render(this.scene, this.camera);
     }
