@@ -22,6 +22,7 @@ export class GameEngine {
         this.currentWorld = null;
         this.savedChanges = {}; 
         this.selectedBlock = 'grass';
+        this.canJump = false;
     }
 
     init() {
@@ -30,18 +31,31 @@ export class GameEngine {
         document.body.appendChild(this.renderer.domElement);
         this.scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-        // ТЕКСТУРИ (Переконайся, що файли є в /assets/)
+        // ТЕКСТУРИ
         const texNames = ['grass', 'stone', 'wood', 'leaves'];
         this.mats = {};
         texNames.forEach(name => {
-            const t = this.loader.load(`./assets/${name}.png`, undefined, undefined, () => {
-                console.error(`Не вдалося завантажити текстуру: ${name}`);
-            });
+            const t = this.loader.load(`./assets/${name}.png`);
             t.magFilter = t.minFilter = THREE.NearestFilter;
             this.mats[name] = new THREE.MeshLambertMaterial({ map: t });
         });
 
         this.createWorldMenu();
+
+        document.addEventListener('keydown', (e) => this.keys[e.code] = true);
+        document.addEventListener('keyup', (e) => this.keys[e.code] = false);
+        
+        document.addEventListener('mousedown', (e) => {
+            if (this.controls.isLocked) this.interact(e.button === 0);
+        });
+
+        // Вибір блоків
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Digit1') this.selectedBlock = 'grass';
+            if (e.code === 'Digit2') this.selectedBlock = 'stone';
+            if (e.code === 'Digit3') this.selectedBlock = 'wood';
+        });
+
         this.animate();
     }
 
@@ -49,46 +63,32 @@ export class GameEngine {
         const menu = document.createElement('div');
         menu.id = 'world-menu';
         menu.style = `position:absolute;top:0;left:0;width:100%;height:100%;background:#1a1a1a;color:white;display:flex;flex-direction:column;align-items:center;z-index:200;padding:50px;font-family:monospace;`;
-        this.renderWorldList(menu);
-        document.body.appendChild(menu);
-    }
-
-    renderWorldList(container) {
+        
         const worlds = JSON.parse(localStorage.getItem('blockstream_worlds') || '[]');
-        container.innerHTML = `<h1 style="color:#4CAF50">BLOCKSTREAM: СЕРВЕРИ</h1>`;
+        menu.innerHTML = `<h1 style="color:#4CAF50">BLOCKSTREAM: СЕРВЕРИ</h1>
+            <div id="world-list" style="margin:20px;"></div>
+            <input id="world-name" placeholder="Назва світу..." style="padding:10px;">
+            <button id="create-btn" style="padding:10px; background:#4CAF50; color:white; border:none; cursor:pointer; margin-top:10px;">СТВОРИТИ</button>`;
         
-        const list = document.createElement('div');
-        list.style = "width:320px; max-height:300px; overflow-y:auto; margin:20px; border:1px solid #444; padding:10px;";
-        
+        document.body.appendChild(menu);
+
+        const list = document.getElementById('world-list');
         worlds.forEach(name => {
-            const row = document.createElement('div');
-            row.style = "display:flex; margin-bottom:5px;";
             const btn = document.createElement('button');
             btn.innerText = `Увійти: ${name}`;
-            btn.style = "flex-grow:1; padding:10px; cursor:pointer; background:#4CAF50; color:white; border:none;";
+            btn.style = "display:block; width:200px; padding:10px; margin:5px; cursor:pointer;";
             btn.onclick = () => this.startWorld(name);
-            row.appendChild(btn);
-            list.appendChild(row);
+            list.appendChild(btn);
         });
 
-        const input = document.createElement('input');
-        input.placeholder = "Назва нового світу...";
-        input.style = "padding:10px; width:200px; border:none;";
-        
-        const createBtn = document.createElement('button');
-        createBtn.innerText = "СТВОРИТИ";
-        createBtn.style = "padding:10px; background:#4CAF50; color:white; border:none; cursor:pointer; margin-left:5px;";
-        createBtn.onclick = () => {
-            if(input.value && !worlds.includes(input.value)) {
-                worlds.push(input.value);
+        document.getElementById('create-btn').onclick = () => {
+            const name = document.getElementById('world-name').value;
+            if(name && !worlds.includes(name)) {
+                worlds.push(name);
                 localStorage.setItem('blockstream_worlds', JSON.stringify(worlds));
-                this.renderWorldList(container);
+                location.reload();
             }
         };
-
-        container.appendChild(list);
-        container.appendChild(input);
-        container.appendChild(createBtn);
     }
 
     startWorld(name) {
@@ -103,26 +103,24 @@ export class GameEngine {
     }
 
     save() {
-        if(this.currentWorld) {
-            const data = {
-                changes: this.savedChanges,
-                pos: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z }
-            };
-            localStorage.setItem(`world_${this.currentWorld}`, JSON.stringify(data));
-        }
+        if(!this.currentWorld) return;
+        const data = {
+            changes: this.savedChanges,
+            pos: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z }
+        };
+        localStorage.setItem(`world_${this.currentWorld}`, JSON.stringify(data));
     }
 
     createTree(x, y, z) {
-        const treeKey = `tree_${x}_${z}`;
-        // Якщо це дерево вже було "зрубане" (збережено як air), не малюємо його
-        for (let i = 1; i <= 3; i++) this.addBlock(x, y + i, z, 'wood', true);
+        // Стовбур
+        for (let i = 1; i <= 3; i++) this.addBlock(x, y + i, z, 'wood');
+        // Листя
         for (let lx = -1; lx <= 1; lx++) {
             for (let lz = -1; lz <= 1; lz++) {
-                for (let ly = 4; ly <= 5; ly++) {
-                    this.addBlock(x + lx, y + ly, z + lz, 'leaves', true);
-                }
+                this.addBlock(x + lx, y + 4, z + lz, 'leaves');
             }
         }
+        this.addBlock(x, y + 5, z, 'leaves');
     }
 
     createChunk(cx, cz) {
@@ -133,31 +131,25 @@ export class GameEngine {
             for (let z = 0; z < this.chunkSize; z++) {
                 const wx = cx * this.chunkSize + x;
                 const wz = cz * this.chunkSize + z;
-                
-                const h = Math.floor(Math.abs(Math.sin(wx * 0.1) * Math.cos(wz * 0.1)) * 4) + 5;
-                
-                // Основні блоки ландшафту
-                this.addBlock(wx, h, wz, 'grass', true);
-                this.addBlock(wx, h - 1, wz, 'stone', true);
+                const h = Math.floor(Math.abs(Math.sin(wx * 0.1) * Math.cos(wz * 0.1)) * 3) + 5;
 
-                // Дерева (генеруємо тільки якщо немає збережених змін у цій точці)
-                const treeChance = Math.abs(Math.sin(wx * 123.45) * Math.cos(wz * 543.21));
-                if (treeChance < 0.02) {
-                    this.createTree(wx, h, wz);
-                }
+                this.addBlock(wx, h, wz, 'grass');
+                this.addBlock(wx, h - 1, wz, 'stone');
+
+                // Фікс дерев: використовуємо фіксований шанс на основі координат
+                const treeChance = Math.abs(Math.sin(wx * 12.34) * Math.cos(wz * 56.78));
+                if (treeChance < 0.02) this.createTree(wx, h, wz);
             }
         }
         this.chunks.set(key, true);
     }
 
-    addBlock(x, y, z, defaultType, isAuto) {
-        const blockKey = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
-        const saved = this.savedChanges[blockKey];
-        
-        if (saved === 'air') return;
-        const type = saved || defaultType;
+    addBlock(x, y, z, type) {
+        const key = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
+        if (this.savedChanges[key] === 'air') return;
+        const finalType = this.savedChanges[key] || type;
 
-        const block = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), this.mats[type]);
+        const block = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), this.mats[finalType]);
         block.position.set(x, y, z);
         block.name = "voxel";
         this.scene.add(block);
@@ -166,25 +158,26 @@ export class GameEngine {
     interact(isBreaking) {
         this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
         const intersects = this.raycaster.intersectObjects(this.scene.children);
-        
         if (intersects.length > 0) {
             const obj = intersects[0].object;
             const p = obj.position;
-            
+            const key = `${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}`;
+
             if (isBreaking) {
-                this.savedChanges[`${p.x},${p.y},${p.z}`] = 'air';
+                this.savedChanges[key] = 'air';
                 this.scene.remove(obj);
             } else {
-                const n = obj.position.clone().add(intersects[0].face.normal);
-                const newKey = `${n.x},${n.y},${n.z}`;
+                const n = p.clone().add(intersects[0].face.normal);
+                const newKey = `${Math.round(n.x)},${Math.round(n.y)},${Math.round(n.z)}`;
                 this.savedChanges[newKey] = this.selectedBlock;
-                this.addBlock(n.x, n.y, n.z, this.selectedBlock, false);
+                this.addBlock(n.x, n.y, n.z, this.selectedBlock);
             }
             this.save();
         }
     }
 
     updateChunks() {
+        if(!this.currentWorld) return;
         const pCX = Math.floor(this.camera.position.x / this.chunkSize);
         const pCZ = Math.floor(this.camera.position.z / this.chunkSize);
         for (let x = -this.renderDistance; x <= this.renderDistance; x++) {
@@ -192,7 +185,6 @@ export class GameEngine {
                 this.createChunk(pCX + x, pCZ + z);
             }
         }
-        this.save(); // Зберігаємо позицію при пересуванні
     }
 
     checkCollision(vector) {
@@ -211,24 +203,27 @@ export class GameEngine {
             this.camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
             const side = new THREE.Vector3().crossVectors(this.camera.up, dir).negate();
 
-            if (this.keys['KeyW'] && !this.checkCollision(dir)) this.controls.moveForward(0.15);
-            if (this.keys['KeyS'] && !this.checkCollision(dir.clone().negate())) this.controls.moveForward(-0.15);
-            if (this.keys['KeyA'] && !this.checkCollision(side.clone().negate())) this.controls.moveRight(-0.15);
-            if (this.keys['KeyD'] && !this.checkCollision(side)) this.controls.moveRight(0.15);
+            if (this.keys['KeyW'] && !this.checkCollision(dir)) this.controls.moveForward(0.12);
+            if (this.keys['KeyS'] && !this.checkCollision(dir.clone().negate())) this.controls.moveForward(-0.12);
+            if (this.keys['KeyA'] && !this.checkCollision(side.clone().negate())) this.controls.moveRight(-0.12);
+            if (this.keys['KeyD'] && !this.checkCollision(side)) this.controls.moveRight(0.12);
 
             this.camera.position.y += this.velocity.y * delta;
-            const ray = new THREE.Raycaster(this.camera.position, new THREE.Vector3(0, -1, 0));
-            const hits = ray.intersectObjects(this.scene.children);
-            
+
+            const groundRay = new THREE.Raycaster(this.camera.position, new THREE.Vector3(0, -1, 0));
+            const hits = groundRay.intersectObjects(this.scene.children);
             if (hits.length > 0 && hits[0].distance < this.playerHeight) {
                 this.velocity.y = 0;
                 this.camera.position.y += (this.playerHeight - hits[0].distance);
                 this.canJump = true;
             } else { this.canJump = false; }
+
+            if (this.keys['Space'] && this.canJump) this.velocity.y = 8;
             
-            if (this.keys['Space'] && this.canJump) this.velocity.y = 9;
-            
-            if (Math.floor(this.camera.position.x) % 4 === 0) this.updateChunks();
+            if (Math.abs(this.camera.position.x % 4) < 0.1) {
+                this.updateChunks();
+                this.save();
+            }
         }
         this.renderer.render(this.scene, this.camera);
     }
