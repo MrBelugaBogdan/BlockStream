@@ -15,6 +15,7 @@ export class GameEngine {
         this.inventory = ['grass', 'stone', 'wood', 'leaves'];
         this.selectedSlot = 0;
         this.physics = new Physics(1.7);
+        this.raycaster = new THREE.Raycaster(); // Для взаємодії з блоками
     }
 
     loadMaterials() {
@@ -35,10 +36,8 @@ export class GameEngine {
         this.mats = this.loadMaterials();
         this.world = new World(this.scene, this.mats);
         
-        // ВАЖЛИВО: Ставимо камеру вище, щоб не провалитися крізь землю
-        this.camera.position.set(4, 25, 4);
-
-        UI.createHotbar(this.inventory, this.selectedSlot);
+        // ПОВЕРТАЄМО МЕНЮ СЕРВЕРІВ
+        this.createWorldMenu();
 
         document.addEventListener('keydown', (e) => {
             this.keys[e.code] = true;
@@ -49,9 +48,54 @@ export class GameEngine {
         });
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
 
-        // Початкова генерація
-        this.world.generateChunk(0, 0);
+        // Взаємодія з блоками (ЛКМ/ПКМ)
+        document.addEventListener('mousedown', (e) => {
+            if (this.controls.isLocked) this.interact(e.button === 0);
+        });
+
         this.animate();
+    }
+
+    createWorldMenu() {
+        // Ми використовуємо статичний метод з UI
+        UI.createWorldMenu((name) => this.startWorld(name));
+    }
+
+    startWorld(name) {
+        this.currentWorld = name;
+        const data = JSON.parse(localStorage.getItem(`world_${name}`) || '{"changes":{}, "pos":{"x":4,"y":25,"z":4}}');
+        this.world.savedChanges = data.changes;
+        this.camera.position.set(data.pos.x, data.pos.y, data.pos.z);
+        
+        UI.createHotbar(this.inventory, this.selectedSlot);
+        this.controls.lock();
+    }
+
+    interact(isBreaking) {
+        this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+        const intersects = this.raycaster.intersectObjects(this.scene.children);
+        if (intersects.length > 0) {
+            const obj = intersects[0].object;
+            const p = obj.position;
+            if (isBreaking) {
+                this.world.savedChanges[`${p.x},${p.y},${p.z}`] = 'air';
+                this.scene.remove(obj);
+            } else {
+                const n = p.clone().add(intersects[0].face.normal);
+                const type = this.inventory[this.selectedSlot];
+                this.world.savedChanges[`${Math.round(n.x)},${Math.round(n.y)},${Math.round(n.z)}`] = type;
+                this.world.addBlock(n.x, n.y, n.z, type);
+            }
+            this.save();
+        }
+    }
+
+    save() {
+        if (!this.currentWorld) return;
+        localStorage.setItem(`world_${this.currentWorld}`, JSON.stringify({
+            changes: this.world.savedChanges,
+            pos: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z }
+        }));
     }
 
     animate() {
@@ -59,10 +103,16 @@ export class GameEngine {
         if (this.controls.isLocked) {
             this.physics.update(this.camera, this.scene, this.keys, this.controls, 0.016);
             
-            // Генерація чанків навколо гравця
-            const cx = Math.floor(this.camera.position.x / 8);
-            const cz = Math.floor(this.camera.position.z / 8);
-            this.world.generateChunk(cx, cz);
+            // НЕСКІНЧЕННА КАРТА: генеруємо чанки в радіусі 2 навколо гравця
+            const pCX = Math.floor(this.camera.position.x / 8);
+            const pCZ = Math.floor(this.camera.position.z / 8);
+            for(let x = -2; x <= 2; x++) {
+                for(let z = -2; z <= 2; z++) {
+                    this.world.generateChunk(pCX + x, pCZ + z);
+                }
+            }
+
+            if (Math.abs(this.camera.position.x % 2) < 0.1) this.save();
         }
         this.renderer.render(this.scene, this.camera);
     }
