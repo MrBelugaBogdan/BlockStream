@@ -9,11 +9,7 @@ export class Physics {
     }
 
     update(camera, scene, keys, controls, delta) {
-        this.velocity.y -= 25.0 * delta; // Гравітація
-
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
-        const side = new THREE.Vector3().crossVectors(camera.up, dir).negate();
+        this.velocity.y -= 25.0 * delta;
 
         if (keys['KeyW']) controls.moveForward(0.12);
         if (keys['KeyS']) controls.moveForward(-0.12);
@@ -22,14 +18,19 @@ export class Physics {
 
         camera.position.y += this.velocity.y * delta;
 
-        // Колізія з підлогою
         this.raycaster.set(camera.position, new THREE.Vector3(0, -1, 0));
         const hits = this.raycaster.intersectObjects(scene.children);
         
-        if (hits.length > 0 && hits[0].distance < this.playerHeight) {
-            this.velocity.y = 0;
-            camera.position.y += (this.playerHeight - hits[0].distance);
-            this.canJump = true;
+        if (hits.length > 0) {
+            const hitDist = hits[0].distance;
+            // Тільки низькі перешкоди дозволяють піднятися
+            if (hitDist < this.playerHeight && hitDist > this.playerHeight - 0.6) {
+                this.velocity.y = 0;
+                camera.position.y += (this.playerHeight - hitDist);
+                this.canJump = true;
+            } else if (hitDist < this.playerHeight - 0.6) {
+                this.velocity.y = 0;
+            }
         } else {
             this.canJump = false;
         }
