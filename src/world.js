@@ -13,7 +13,6 @@ export class World {
     addBlock(x, y, z, type) {
         const key = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
         if (this.savedChanges[key] === 'air') return;
-        
         if (this.scene.getObjectByName(key)) return;
 
         const finalType = this.savedChanges[key] || type;
@@ -42,10 +41,8 @@ export class World {
                 const wx = cx * this.chunkSize + x;
                 const wz = cz * this.chunkSize + z;
                 const h = Math.floor(Math.abs(Math.sin(wx * 0.1) * Math.cos(wz * 0.1)) * 3) + 5;
-
                 this.addBlock(wx, h, wz, 'grass');
                 this.addBlock(wx, h - 1, wz, 'stone');
-
                 const treeSeed = Math.abs(Math.sin(wx * 12.3) * Math.cos(wz * 45.6));
                 if (treeSeed < 0.02) this.createTree(wx, h, wz);
             }
