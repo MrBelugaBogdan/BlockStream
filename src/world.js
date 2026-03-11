@@ -30,6 +30,7 @@ export class World {
                 this.addBlock(x + lx, y + 4, z + lz, 'leaves');
             }
         }
+        this.addBlock(x, y + 5, z, 'leaves');
     }
 
     generateChunk(cx, cz) {
