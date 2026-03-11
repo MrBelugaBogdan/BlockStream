@@ -9,13 +9,13 @@ export class GameEngine {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x70a1ff);
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 150);
-        this.renderer = new THREE.WebGLRenderer({ antialias: false });
+        this.renderer = new THREE.WebGLRenderer();
         this.controls = new PointerLockControls(this.camera, document.body);
         this.keys = {};
         this.inventory = ['grass', 'stone', 'wood', 'leaves'];
         this.selectedSlot = 0;
         this.physics = new Physics(1.7);
-        this.raycaster = new THREE.Raycaster(); // Для взаємодії з блоками
+        this.raycaster = new THREE.Raycaster();
     }
 
     loadMaterials() {
@@ -31,13 +31,11 @@ export class GameEngine {
     async init() {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(this.renderer.domElement);
-        this.scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
         this.mats = this.loadMaterials();
         this.world = new World(this.scene, this.mats);
-        
-        // ПОВЕРТАЄМО МЕНЮ СЕРВЕРІВ
-        this.createWorldMenu();
+
+        UI.createMainMenu((config) => this.startWorld(config));
 
         document.addEventListener('keydown', (e) => {
             this.keys[e.code] = true;
@@ -47,8 +45,6 @@ export class GameEngine {
             }
         });
         document.addEventListener('keyup', (e) => this.keys[e.code] = false);
-
-        // Взаємодія з блоками (ЛКМ/ПКМ)
         document.addEventListener('mousedown', (e) => {
             if (this.controls.isLocked) this.interact(e.button === 0);
         });
@@ -56,18 +52,13 @@ export class GameEngine {
         this.animate();
     }
 
-    createWorldMenu() {
-        // Ми використовуємо статичний метод з UI
-        UI.createWorldMenu((name) => this.startWorld(name));
-    }
-
-    startWorld(name) {
-        this.currentWorld = name;
-        const data = JSON.parse(localStorage.getItem(`world_${name}`) || '{"changes":{}, "pos":{"x":4,"y":25,"z":4}}');
+    startWorld(config) {
+        this.currentWorld = config.name;
+        this.gameMode = config.mode;
+        const data = JSON.parse(localStorage.getItem(`world_${config.name}`) || '{"changes":{}, "pos":{"x":4,"y":25,"z":4}}');
         this.world.savedChanges = data.changes;
         this.camera.position.set(data.pos.x, data.pos.y, data.pos.z);
-        
-        UI.createHotbar(this.inventory, this.selectedSlot);
+        UI.createHotbar(this.inventory, this.selectedSlot, this.gameMode);
         this.controls.lock();
     }
 
@@ -102,8 +93,6 @@ export class GameEngine {
         requestAnimationFrame(() => this.animate());
         if (this.controls.isLocked) {
             this.physics.update(this.camera, this.scene, this.keys, this.controls, 0.016);
-            
-            // НЕСКІНЧЕННА КАРТА: генеруємо чанки в радіусі 2 навколо гравця
             const pCX = Math.floor(this.camera.position.x / 8);
             const pCZ = Math.floor(this.camera.position.z / 8);
             for(let x = -2; x <= 2; x++) {
@@ -111,8 +100,6 @@ export class GameEngine {
                     this.world.generateChunk(pCX + x, pCZ + z);
                 }
             }
-
-            if (Math.abs(this.camera.position.x % 2) < 0.1) this.save();
         }
         this.renderer.render(this.scene, this.camera);
     }
