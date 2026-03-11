@@ -9,7 +9,7 @@ export class GameEngine {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x70a1ff);
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 150);
-        this.renderer = new THREE.WebGLRenderer();
+        this.renderer = new THREE.WebGLRenderer({ antialias: false });
         this.controls = new PointerLockControls(this.camera, document.body);
         this.keys = {};
         this.inventory = ['grass', 'stone', 'wood', 'leaves'];
@@ -28,7 +28,7 @@ export class GameEngine {
         return mats;
     }
 
-    async init() {
+    init() {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(this.renderer.domElement);
         this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
@@ -55,11 +55,10 @@ export class GameEngine {
     startWorld(config) {
         this.currentWorld = config.name;
         this.gameMode = config.mode;
-        const data = JSON.parse(localStorage.getItem(`world_${config.name}`) || '{"changes":{}, "pos":{"x":4,"y":25,"z":4}}');
+        const data = JSON.parse(localStorage.getItem(`world_save_${config.name}`) || '{"changes":{}, "pos":{"x":4,"y":30,"z":4}}');
         this.world.savedChanges = data.changes;
         this.camera.position.set(data.pos.x, data.pos.y, data.pos.z);
         UI.createHotbar(this.inventory, this.selectedSlot, this.gameMode);
-        this.controls.lock();
     }
 
     interact(isBreaking) {
@@ -68,8 +67,9 @@ export class GameEngine {
         if (intersects.length > 0) {
             const obj = intersects[0].object;
             const p = obj.position;
+            const key = `${p.x},${p.y},${p.z}`;
             if (isBreaking) {
-                this.world.savedChanges[`${p.x},${p.y},${p.z}`] = 'air';
+                this.world.savedChanges[key] = 'air';
                 this.scene.remove(obj);
             } else {
                 const n = p.clone().add(intersects[0].face.normal);
@@ -83,7 +83,7 @@ export class GameEngine {
 
     save() {
         if (!this.currentWorld) return;
-        localStorage.setItem(`world_${this.currentWorld}`, JSON.stringify({
+        localStorage.setItem(`world_save_${this.currentWorld}`, JSON.stringify({
             changes: this.world.savedChanges,
             pos: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z }
         }));
@@ -96,9 +96,7 @@ export class GameEngine {
             const pCX = Math.floor(this.camera.position.x / 8);
             const pCZ = Math.floor(this.camera.position.z / 8);
             for(let x = -2; x <= 2; x++) {
-                for(let z = -2; z <= 2; z++) {
-                    this.world.generateChunk(pCX + x, pCZ + z);
-                }
+                for(let z = -2; z <= 2; z++) this.world.generateChunk(pCX + x, pCZ + z);
             }
         }
         this.renderer.render(this.scene, this.camera);
