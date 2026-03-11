@@ -9,7 +9,8 @@ export class Physics {
     }
 
     update(camera, scene, keys, controls, delta) {
-        this.velocity.y -= 25.0 * delta;
+        // Жорстка гравітація
+        this.velocity.y -= 28.0 * delta; 
 
         if (keys['KeyW']) controls.moveForward(0.12);
         if (keys['KeyS']) controls.moveForward(-0.12);
@@ -18,23 +19,32 @@ export class Physics {
 
         camera.position.y += this.velocity.y * delta;
 
+        // Промінь вниз для перевірки підлоги
         this.raycaster.set(camera.position, new THREE.Vector3(0, -1, 0));
         const hits = this.raycaster.intersectObjects(scene.children);
         
         if (hits.length > 0) {
             const hitDist = hits[0].distance;
-            // Тільки низькі перешкоди дозволяють піднятися
-            if (hitDist < this.playerHeight && hitDist > this.playerHeight - 0.6) {
+            // Якщо ноги нижче рівня землі — виштовхуємо вгору
+            if (hitDist < this.playerHeight) {
                 this.velocity.y = 0;
                 camera.position.y += (this.playerHeight - hitDist);
                 this.canJump = true;
-            } else if (hitDist < this.playerHeight - 0.6) {
-                this.velocity.y = 0;
             }
         } else {
             this.canJump = false;
         }
 
-        if (keys['Space'] && this.canJump) this.velocity.y = 9;
+        // Захист від падіння в безодню
+        if (camera.position.y < -20) {
+            camera.position.set(4, 30, 4);
+            this.velocity.y = 0;
+        }
+
+        // Стрибок (тільки якщо торкаємося землі)
+        if (keys['Space'] && this.canJump) {
+            this.velocity.y = 11;
+            this.canJump = false;
+        }
     }
 }
